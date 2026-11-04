@@ -36,7 +36,7 @@ export default function Projection() {
 
   useEffect(() => {
     if (kf) {
-      setForm((f) => ({ ...f, k: Math.round(kf.k * 100) / 100, cycleDays: kf.cycle_time_hours ? +(kf.cycle_time_hours / 24).toFixed(1) : f.cycleDays }));
+      setForm((f) => ({ ...f, k: Math.round(kf.k * 100) / 100, cycleDays: kf.cycle_time_hours != null ? Math.max(0.1, +(kf.cycle_time_hours / 24).toFixed(1)) : 7 }));
     }
   }, [kf?.campaign_id, kf?.k, kf?.cycle_time_hours]); // eslint-disable-line react-hooks/exhaustive-deps
 

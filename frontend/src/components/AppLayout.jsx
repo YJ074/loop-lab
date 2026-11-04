@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
+import { Sheet, SheetContent, SheetTrigger, SheetTitle } from "@/components/ui/sheet";
 import { useAuth } from "@/context/AuthContext";
 import {
-  Repeat, LayoutDashboard, Megaphone, Target, Coins, ShieldAlert, Settings, LogOut, LineChart,
+  Repeat, LayoutDashboard, Megaphone, Target, Coins, ShieldAlert, Settings, LogOut, LineChart, Menu,
 } from "lucide-react";
 
 const NAV = [
@@ -17,11 +19,10 @@ const NAV = [
 export default function AppLayout({ children }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
 
-  return (
-    <div className="min-h-screen bg-slate-50">
-      {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 w-64 bg-slate-950 text-slate-300 flex flex-col z-30">
+  const sidebar = (
+    <>
         <div
           className="h-16 flex items-center gap-2 px-5 border-b border-white/10 cursor-pointer"
           onClick={() => navigate("/dashboard")}
@@ -39,6 +40,7 @@ export default function AppLayout({ children }) {
               to={item.to}
               end={item.to === "/dashboard"}
               data-testid={item.testId}
+              onClick={() => setOpen(false)}
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                   isActive
@@ -75,11 +77,33 @@ export default function AppLayout({ children }) {
             Sign out
           </button>
         </div>
+    </>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      <aside className="hidden md:flex fixed inset-y-0 left-0 w-64 bg-slate-950 text-slate-300 flex-col z-30">
+        {sidebar}
       </aside>
 
-      {/* Main */}
-      <main className="pl-64">
-        <div className="max-w-7xl mx-auto px-8 py-8">{children}</div>
+      <header className="md:hidden sticky top-0 z-30 h-14 bg-slate-950 flex items-center justify-between px-4">
+        <div className="flex items-center gap-2" onClick={() => navigate("/dashboard")}>
+          <div className="h-7 w-7 rounded-lg bg-indigo-500 flex items-center justify-center text-white"><Repeat className="h-4 w-4" /></div>
+          <span className="font-display font-bold text-white">Loop Lab</span>
+        </div>
+        <Sheet open={open} onOpenChange={setOpen}>
+          <SheetTrigger asChild>
+            <button className="text-slate-300 p-2" data-testid="mobile-menu-button" aria-label="Open menu"><Menu className="h-5 w-5" /></button>
+          </SheetTrigger>
+          <SheetContent side="left" className="w-64 p-0 bg-slate-950 text-slate-300 border-white/10 flex flex-col" data-testid="mobile-menu">
+            <SheetTitle className="sr-only">Menu</SheetTitle>
+            {sidebar}
+          </SheetContent>
+        </Sheet>
+      </header>
+
+      <main className="md:pl-64 min-w-0">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 md:px-8 py-6 md:py-8">{children}</div>
       </main>
     </div>
   );

@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 4 tested the K-factor feature end to end. Backend: 53 of 54 tests pass (12 new tests in test_iteration4_kfactor.py; all iteration 2/3 tests now pass). The 1 failure is a flaky, pre-existing race in workspace bootstrap. All 5 acceptance criteria pass in the API and the UI: (1) a new campaign shows 0.00 and 'not enough data'; (2) after Reset demo, K is 0.00 with 0 customers and the other campaign is untouched; (3) 1 advocate + 1 verified conversion gives 1.00, and the panel updated live via polling with no reload; (4) 10 advocates / 3 verified gives 0.30 with the 'Below 1' line, and the seeded K of 1.25 shows the 'Above 1' line; (5) campaigns are kept apart. Flagged conversions (self-referral, coupon) and pending ones (no fingerprint) are not counted, and approving a pending one counts it. Simulate share & click adds +1 share and 0-2 clicks, the panel updates, and with 0 advocates it returns 400 with a toast. Public share/click endpoints increment counts and return 404 for unknown codes. The Overview switcher, How K works, Projection inputs, the network toggle's dashed line and the hypothesis label all work. FAILED: phone width (390px). All three pages scroll sideways because the 256px sidebar is always shown and main has pl-64.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "_kfactor cycle_time_hours", "issue": "Cycle time compares each conversion with the advocate's first_shared_at, even when the share came AFTER the conversion. The negative gap is clamped to 0 by max(0, d). Reproduce: reset a campaign, add an advocate, record a verified conversion, then simulate a share. Cycle time changes from 'not enough data' to '0.0 hours'. Fix: skip conversions with a negative gap (d < 0) instead of clamping them."},
+      {"endpoint": "GET /api/* first call for a new user (get_workspace)", "issue": "FLAKY, pre-existing (about 25% failure rate; failed 1 of 4 reruns): when a user with no workspace makes parallel requests, 2 workspaces can be created. The workspaces.owner_user_id index is not unique. Real Google users get a workspace in /auth/session, so the risk there is low. Fix: make the index unique and catch DuplicateKeyError in bootstrap_workspace, or use an upsert."},
+      {"endpoint": "_kfactor decomposition", "issue": "When conversions come from the webhook or CSV with no tracked clicks, conversion_rate is 0 while K is above 0, so shares × click rate × conv. rate no longer equals K (the UI shows '3 verified ÷ 0' = 0.0%). Consider showing '—' or a note when clicks = 0."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AppLayout (all protected pages)", "issue": "Phone width 390px FAILS. scrollWidth is 451px on Overview, 669px on Campaign detail and 430px on Projection. The sidebar is always 'fixed w-64' and main is 'pl-64' with no responsive breakpoints, so the content area is about 134px wide and text wraps word by word (for example the K panel title). Fix: hide the sidebar below md (hidden md:flex), add a mobile top bar with a Sheet/drawer menu, change main to 'md:pl-64' with px-4 on mobile, and let the Campaign detail action buttons wrap.", "selector": "aside.fixed.w-64, main.pl-64", "priority": "HIGH"},
+      {"component": "Projection cycle-days default", "issue": "When the selected campaign has cycle_time_hours null or 0, the 'Cycle days' input keeps the previous campaign's value, because the code uses `kf.cycle_time_hours ? ... : f.cycleDays`. 0 is falsy. Seen: switching from the seeded campaign (10.4 days) to a campaign measuring 0.0 hours kept 10.4. Fix: use an explicit null check, and on a campaign switch with null cycle time reset the input to the default of 7.", "selector": "[data-testid=projection-cycle-input]", "priority": "MEDIUM"}
+    ],
+    "integration_issues": [
+      {"flow": "Campaign detail live update", "issue": "Only the K panel polls. After external webhook conversions, the K panel showed 3 verified while the Conversions / Approved liability stat cards still showed 0 until a reload. Consider polling the campaign stats too, or invalidating them when the kfactor data changes.", "affected_selectors": ["[data-testid=kfactor-panel]"]}
+    ],
+    "design_issues": [
+      {"screen": "Campaign detail after reset", "issues": ["The Share flows footer reads 'Sample links shown for advocate . Each advocate…' (empty name, stray space) when there are 0 advocates."]},
+      {"screen": "New campaign K panel", "issues": ["A brand-new campaign's 3 starter advocates have random demo shares and clicks (for example 239 shares / 84.5% click rate), so a 'fresh' campaign shows activity it never had. This matches the spec (the demo flag), but consider labelling it as demo data."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration4_kfactor.py", "/app/backend/tests/test_iteration3_fixes.py", "/app/backend/tests/test_iteration2_fixes.py", "/app/backend/tests/test_looplab_api.py", "/app/test_reports/pytest/pytest_results_iter4.xml"],
+  "action_items": [
+    "HIGH: make AppLayout responsive (sidebar drawer below md, md:pl-64, smaller padding) so that Overview, Campaign detail and Projection have no sideways scroll at 390px",
+    "MEDIUM: Projection: when cycle_time_hours is null, reset Cycle days to the default on a campaign switch; treat 0 as a valid value",
+    "MEDIUM: _kfactor: ignore conversions that happened before the advocate's first share when computing cycle time (don't clamp to 0)",
+    "LOW: make workspaces.owner_user_id unique and make bootstrap idempotent (race)",
+    "LOW: refresh campaign stat cards together with the polled K panel; fix the 'advocate .' footer text when there are 0 advocates"
+  ],
+  "critical_code_review_comments": [
+    "Public share/click endpoints have no auth or rate limiting. Anyone who knows a short_code can inflate shares and clicks and change K's parts. This is fine for demo mode but needs dedupe or throttling before production.",
+    "Projection useEffect overwrites the user's edited K whenever the polled k changes (deps include kf.k). It is stable in practice, but user edits are lost silently if new conversions arrive.",
+    "server.py is 830 lines, over the 700-line guideline. Move the K-factor/public tracking and campaign routers into modules.",
+    "reset_campaign does not log which records were removed beyond counts. Acceptable."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration4_kfactor.py (new)"],
+  "success_rate": {"backend": "98% (53/54; the only failure is the flaky, pre-existing bootstrap race)", "frontend": "about 85% (all K-factor, reset, simulate, switcher, How K works and Projection flows pass; mobile 390px fails on all 3 pages)"},
+  "seed_data_creation": "TEST_ users came only from conftest.create_test_user() and ui_user.py (test-user-bc0c21b738 for UI). At the end all TEST_ users were deleted, along with their sessions, workspaces and the related campaigns/referrers/links/conversions/rewards/audit_logs, filtered by workspace id. I also removed a leftover test-user-1793776315830 (created at 07:11, before this run, likely by the main agent's self-test) with its 1 workspace and that workspace's data. 0 TEST_ or test-user-* users, sessions or workspaces remain. The real user yashjani074@gmail.com was not touched.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run `cd /app/backend/tests && python -m pytest /app/backend/tests -q`. test_concurrent_bootstrap_single_workspace is flaky until the unique index lands. For UI: `python ui_user.py create`; hit /api/workspace once first (avoids the race); set the session_token cookie (secure, SameSite=None). New campaigns need reward_type in discount|store_credit|cash. In the browser tool, use plain screenshot file names (a path containing '/' inside an f-string gets mangled). Retest: mobile 390px on /dashboard, /campaigns/:id and /projection (document scrollWidth must be <= 390); the Projection cycle default; cycle time when a share follows the conversion.",
+  "rca of the issue": "Mobile overflow: AppLayout.jsx renders <aside className='fixed ... w-64'> and <main className='pl-64'> with no sm/md variants, so at 390px the content area is about 134px and wide children overflow. Cycle time 0.0: _kfactor uses max(0.0, d), and simulate-activity/public_share set first_shared_at after a conversion already exists. Projection carry-over: a truthiness check on cycle_time_hours keeps the previous form value."
+}

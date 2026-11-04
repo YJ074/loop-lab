@@ -169,11 +169,18 @@ async def get_current_user(request: Request) -> dict:
     return user
 
 
+_bootstrap_locks: dict = {}
+
+
 async def get_workspace(user: dict) -> dict:
     ws = await db.workspaces.find_one({"owner_user_id": user["user_id"]}, {"_id": 0})
     if not ws:
-        await bootstrap_workspace(user)
-        ws = await db.workspaces.find_one({"owner_user_id": user["user_id"]}, {"_id": 0})
+        lock = _bootstrap_locks.setdefault(user["user_id"], asyncio.Lock())
+        async with lock:
+            ws = await db.workspaces.find_one({"owner_user_id": user["user_id"]}, {"_id": 0})
+            if not ws:
+                await bootstrap_workspace(user)
+                ws = await db.workspaces.find_one({"owner_user_id": user["user_id"]}, {"_id": 0})
     return ws
 
 
@@ -732,7 +739,8 @@ async def _kfactor(camp: dict) -> dict:
         fs = first_share.get(c["referrer_id"])
         if fs:
             d = (datetime.fromisoformat(c["created_at"]) - datetime.fromisoformat(fs)).total_seconds() / 3600
-            deltas.append(max(0.0, d))
+            if d >= 0:
+                deltas.append(d)
     return {
         "campaign_id": camp["id"], "campaign_name": camp["name"],
         "customers": customers, "shares": shares, "clicks": clicks, "conversions": conversions,

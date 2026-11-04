@@ -28,7 +28,7 @@ export default function CampaignDetail() {
   const [refName, setRefName] = useState("");
   const [refEmail, setRefEmail] = useState("");
 
-  const { data: camp } = useQuery({ queryKey: ["campaign", id], queryFn: async () => (await api.get(`/campaigns/${id}`)).data });
+  const { data: camp } = useQuery({ queryKey: ["campaign", id], queryFn: async () => (await api.get(`/campaigns/${id}`)).data, refetchInterval: 5000 });
   const { data: referrers = [] } = useQuery({ queryKey: ["referrers", id], queryFn: async () => (await api.get(`/campaigns/${id}/referrers`)).data });
   const { data: share } = useQuery({ queryKey: ["share", id], queryFn: async () => (await api.get(`/campaigns/${id}/share`)).data });
   const { data: conversions = [] } = useQuery({ queryKey: ["conversions", id], queryFn: async () => (await api.get(`/conversions?campaign_id=${id}`)).data });
@@ -182,7 +182,7 @@ export default function CampaignDetail() {
               );
             })}
           </div>
-          <p className="text-xs text-slate-400">Sample links shown for advocate <span className="font-medium">{share?.sample_advocate}</span>. Each advocate gets unique tracked links per channel.</p>
+          <p className="text-xs text-slate-400">{share?.sample_advocate ? <>Sample links shown for advocate <span className="font-medium">{share.sample_advocate}</span>. </> : "Add an advocate to generate tracked links. "}Each advocate gets unique tracked links per channel.</p>
         </TabsContent>
 
         {/* Advocates */}
@@ -195,7 +195,7 @@ export default function CampaignDetail() {
               <Button onClick={() => addRefMut.mutate()} disabled={!refName || !refEmail || addRefMut.isPending} className="bg-indigo-600 hover:bg-indigo-700" data-testid="add-advocate-button">Add & generate links</Button>
             </div>
           </div>
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
             <table className="w-full text-sm" data-testid="advocates-table">
               <thead><tr className="text-left text-slate-400 border-b border-slate-100 bg-slate-50/50">
                 <th className="py-3 px-4 font-medium">Advocate</th><th className="py-3 px-4 font-medium">Code</th>
@@ -229,7 +229,7 @@ export default function CampaignDetail() {
 
         {/* Rewards */}
         <TabsContent value="rewards" className="mt-5">
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
             <table className="w-full text-sm" data-testid="campaign-rewards-table">
               <thead><tr className="text-left text-slate-400 border-b border-slate-100 bg-slate-50/50">
                 <th className="py-3 px-4 font-medium">Advocate</th><th className="py-3 px-4 font-medium">Type</th>
@@ -255,7 +255,7 @@ export default function CampaignDetail() {
 
 function ConversionsTable({ conversions, cur, reviewMut }) {
   return (
-    <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+    <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
       <table className="w-full text-sm" data-testid="conversions-table">
         <thead><tr className="text-left text-slate-400 border-b border-slate-100 bg-slate-50/50">
           <th className="py-3 px-4 font-medium">Advocate</th><th className="py-3 px-4 font-medium">Order</th>

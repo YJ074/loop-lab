@@ -47,7 +47,7 @@ export default function Conversions() {
         ))}
       </div>
 
-      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+      <div className="bg-white border border-slate-200 rounded-xl overflow-x-auto shadow-sm">
         <table className="w-full text-sm" data-testid="all-conversions-table">
           <thead><tr className="text-left text-slate-400 border-b border-slate-100 bg-slate-50/50">
             <th className="py-3 px-4 font-medium">Advocate</th><th className="py-3 px-4 font-medium">Customer</th>

@@ -23,7 +23,7 @@ const interpret = (k) => {
   return "Below 1: the loop is not paying for itself on its own.";
 };
 
-const pct = (v) => `${(v * 100).toFixed(1)}%`;
+const pct = (v, denom) => (denom ? `${(v * 100).toFixed(1)}%` : "—");
 
 function Part({ label, value, testId, hint }) {
   return (
@@ -75,10 +75,13 @@ export function KFactorPanel({ campaignId }) {
       </div>
       <p className={`text-sm font-medium ${good ? "text-emerald-700" : "text-amber-700"}`} data-testid="kfactor-interpretation">{interpret(K)}</p>
       <div className="grid grid-cols-3 gap-3 sm:gap-6 bg-slate-50 rounded-lg p-3">
-        <Part testId="kfactor-shares-per-customer" label="Shares / customer" value={k.shares_per_customer.toFixed(2)} hint={`${k.shares} shares ÷ ${k.customers}`} />
-        <Part testId="kfactor-click-rate" label="× Click rate" value={pct(k.click_rate)} hint={`${k.clicks} clicks ÷ ${k.shares}`} />
-        <Part testId="kfactor-conversion-rate" label="× Conv. rate" value={pct(k.conversion_rate)} hint={`${k.conversions} verified ÷ ${k.clicks}`} />
+        <Part testId="kfactor-shares-per-customer" label="Shares / customer" value={k.customers ? k.shares_per_customer.toFixed(2) : "—"} hint={`${k.shares} shares ÷ ${k.customers}`} />
+        <Part testId="kfactor-click-rate" label="× Click rate" value={pct(k.click_rate, k.shares)} hint={`${k.clicks} clicks ÷ ${k.shares}`} />
+        <Part testId="kfactor-conversion-rate" label="× Conv. rate" value={pct(k.conversion_rate, k.clicks)} hint={`${k.conversions} verified ÷ ${k.clicks}`} />
       </div>
+      {k.conversions > 0 && !k.clicks && (
+        <p className="text-xs text-slate-500" data-testid="kfactor-untracked-note">Conversions were reported without tracked clicks, so the breakdown can't add up to K yet.</p>
+      )}
       {k.small_sample && (
         <p className="text-xs text-slate-500 italic" data-testid="kfactor-small-sample">Small sample. Treat K as a first reading, not a result. ({k.customers} customers)</p>
       )}
