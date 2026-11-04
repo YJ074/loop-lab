@@ -9,7 +9,7 @@ import uuid
 from contextlib import suppress
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import httpx
 from fastapi import FastAPI, APIRouter, Query, Request, Response, HTTPException, Depends, UploadFile, File
@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ASCENDING, DESCENDING, IndexModel
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 ROOT_DIR = Path(__file__).parent
@@ -96,12 +96,12 @@ class CampaignIn(BaseModel):
     template: str = "ecommerce_purchase"
     audience: str = "all_customers"
     conversion_event: str = "purchase"
-    reward_type: str = "discount"          # discount | store_credit | cash
-    reward_value: float = 10.0
-    reward_currency: str = "USD"
-    language: str = "en"
-    budget_cap: float = 1000.0
-    approval_mode: str = "auto_verify"      # auto_verify | manual | auto_approve
+    reward_type: Literal["discount", "store_credit", "cash"] = "discount"
+    reward_value: float = Field(default=10.0, gt=0)
+    reward_currency: Literal["USD", "EUR", "GBP"] = "USD"
+    language: Literal["en", "es"] = "en"
+    budget_cap: float = Field(default=1000.0, gt=0)
+    approval_mode: Literal["auto_verify", "manual", "auto_approve"] = "auto_verify"
     channels: List[str] = ["whatsapp", "copy_link"]
     paid_cpa_benchmark: float = 40.0
 
@@ -126,6 +126,7 @@ class ConversionWebhookIn(BaseModel):
     event_type: str = "purchase"
     order_value: float = 0.0
     currency: str = "USD"
+    channel: Optional[str] = None
     customer_email: Optional[str] = None
     device_fingerprint: Optional[str] = None
     coupon_code: Optional[str] = None
@@ -242,6 +243,7 @@ async def seed_demo(ws: dict):
             customer_email=f"buyer{i}@example.com",
             device_fingerprint=f"fp_{random.randint(1000,9999)}",
             coupon_code=random.choice(["", "", "SAVE10", "HONEYDEAL"]),
+            channel=random.choice(camp.get("channels") or ["copy_link"]),
         )
         if i == 3:
             payload.customer_email = ref["email"]
@@ -274,7 +276,11 @@ async def _ingest_conversion(ws: dict, camp: dict, payload: ConversionWebhookIn,
     ref = await db.referrers.find_one({"code": payload.code, "campaign_id": camp["id"]}, {"_id": 0})
     if not ref:
         raise HTTPException(status_code=404, detail="Unknown referral code")
-    link = await db.links.find_one({"referrer_id": ref["id"]}, {"_id": 0})
+    link = None
+    if payload.channel:
+        link = await db.links.find_one({"referrer_id": ref["id"], "channel": payload.channel}, {"_id": 0})
+    if not link:
+        link = await db.links.find_one({"referrer_id": ref["id"]}, {"_id": 0})
 
     flags: list[str] = []
     confidence = 85
@@ -314,10 +320,25 @@ async def _ingest_conversion(ws: dict, camp: dict, payload: ConversionWebhookIn,
     await db.conversions.insert_one(dict(conv))
 
     reward_status = "approved" if status == "verified" else "pending"
+    # discount rewards are a % of the order -> record a real monetary liability in the order currency
+    if camp["reward_type"] == "discount":
+        reward_amount = round(payload.order_value * camp["reward_value"] / 100.0, 2)
+        reward_cur = payload.currency
+        reward_rate = camp["reward_value"]
+    else:
+        reward_amount = camp["reward_value"]
+        reward_cur = camp["reward_currency"]
+        reward_rate = None
+    if reward_status == "approved" and camp.get("budget_cap"):
+        spent = await db.rewards.aggregate([
+            {"$match": {"campaign_id": camp["id"], "status": "approved"}},
+            {"$group": {"_id": None, "t": {"$sum": "$amount"}}}]).to_list(1)
+        if (spent[0]["t"] if spent else 0) + reward_amount > camp["budget_cap"]:
+            reward_status = "pending"
     reward = {"id": gen_id("rwd"), "campaign_id": camp["id"], "workspace_id": ws["id"],
               "referrer_id": ref["id"], "referrer_name": ref["name"], "conversion_id": conv["id"],
-              "type": camp["reward_type"], "amount": camp["reward_value"],
-              "currency": camp["reward_currency"], "status": reward_status, "created_at": iso()}
+              "type": camp["reward_type"], "amount": reward_amount, "rate": reward_rate,
+              "currency": reward_cur, "status": reward_status, "created_at": iso()}
     await db.rewards.insert_one(dict(reward))
     await _log(ws["id"], "conversion", f"{source} conversion {conv['id']} -> {status} ({conf_label} confidence)")
     return conv
@@ -342,7 +363,9 @@ async def update_workspace(body: WorkspaceUpdate, user: dict = Depends(get_curre
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
     if updates:
         await db.workspaces.update_one({"id": ws["id"]}, {"$set": updates})
-    return await db.workspaces.find_one({"id": ws["id"]}, {"_id": 0})
+    ws = await db.workspaces.find_one({"id": ws["id"]}, {"_id": 0})
+    ws["webhook_url"] = f"/api/public/conversions/{ws['webhook_token']}"
+    return ws
 
 
 # ---------------------------------------------------------------- Campaign routes
@@ -506,6 +529,7 @@ async def simulate_conversion(campaign_id: str, user: dict = Depends(get_current
         customer_email=random.choice([f"buyer{random.randint(1,999)}@example.com", ref["email"]]),
         device_fingerprint=random.choice([f"fp_{random.randint(1000,9999)}", None]),
         coupon_code=random.choice(["", "", "SAVE10"]),
+        channel=random.choice(camp.get("channels") or ["copy_link"]),
     )
     return await _ingest_conversion(ws, camp, payload, source="demo")
 
@@ -519,23 +543,30 @@ async def import_csv(campaign_id: str, file: UploadFile = File(...), user: dict 
     content = (await file.read()).decode("utf-8", errors="ignore")
     reader = csv.DictReader(io.StringIO(content))
     count = 0
-    for row in reader:
+    skipped: list[dict] = []
+    for i, row in enumerate(reader, start=2):
         code = (row.get("code") or row.get("referral_code") or "").strip()
         if not code:
+            skipped.append({"row": i, "reason": "missing code"})
+            continue
+        try:
+            order_value = float(row.get("order_value", 0) or 0)
+        except ValueError:
+            skipped.append({"row": i, "reason": "invalid order_value"})
             continue
         try:
             payload = ConversionWebhookIn(
                 code=code, event_type=row.get("event_type", "purchase"),
-                order_value=float(row.get("order_value", 0) or 0),
+                order_value=order_value, channel=row.get("channel") or None,
                 currency=row.get("currency", "USD"),
                 customer_email=row.get("customer_email") or None,
                 device_fingerprint=row.get("device_fingerprint") or None,
                 coupon_code=row.get("coupon_code") or None)
             await _ingest_conversion(ws, camp, payload, source="csv")
             count += 1
-        except HTTPException:
-            continue
-    return {"imported": count}
+        except HTTPException as e:
+            skipped.append({"row": i, "reason": e.detail})
+    return {"imported": count, "skipped": skipped}
 
 
 @api_router.post("/conversions/{conversion_id}/review")
@@ -545,12 +576,13 @@ async def review_conversion(conversion_id: str, action: str = Query(...),
     conv = await db.conversions.find_one({"id": conversion_id, "workspace_id": ws["id"]}, {"_id": 0})
     if not conv:
         raise HTTPException(status_code=404, detail="Conversion not found")
-    mapping = {"approve": ("verified", "approved"), "reject": ("flagged", "reversed"),
+    mapping = {"approve": ("verified", "approved"), "reject": ("rejected", "reversed"),
                "reverse": ("reversed", "reversed")}
     if action not in mapping:
         raise HTTPException(status_code=400, detail="Invalid action")
     conv_status, reward_status = mapping[action]
-    await db.conversions.update_one({"id": conversion_id}, {"$set": {"status": conv_status}})
+    await db.conversions.update_one({"id": conversion_id},
+                                    {"$set": {"status": conv_status, "reviewed_at": iso()}})
     await db.rewards.update_one({"conversion_id": conversion_id}, {"$set": {"status": reward_status}})
     await _log(ws["id"], "review", f"Conversion {conversion_id} {action} -> {conv_status}")
     return await db.conversions.find_one({"id": conversion_id}, {"_id": 0})
@@ -590,7 +622,8 @@ async def export_rewards(user: dict = Depends(get_current_user)):
 @api_router.get("/abuse")
 async def abuse_queue(user: dict = Depends(get_current_user)):
     ws = await get_workspace(user)
-    convs = await db.conversions.find({"workspace_id": ws["id"], "flags": {"$ne": []}},
+    convs = await db.conversions.find({"workspace_id": ws["id"], "flags": {"$ne": []},
+                                       "status": {"$in": ["flagged", "pending"]}},
                                       {"_id": 0}).sort("created_at", -1).to_list(500)
     counts = {"self_referral": 0, "device_reuse": 0, "coupon_leakage": 0}
     for c in convs:
@@ -649,7 +682,7 @@ async def public_conversion(webhook_token: str, body: ConversionWebhookIn):
     ws = await db.workspaces.find_one({"webhook_token": webhook_token}, {"_id": 0})
     if not ws:
         raise HTTPException(status_code=404, detail="Invalid webhook token")
-    ref = await db.referrers.find_one({"code": body.code}, {"_id": 0})
+    ref = await db.referrers.find_one({"code": body.code, "workspace_id": ws["id"]}, {"_id": 0})
     if not ref:
         raise HTTPException(status_code=404, detail="Unknown referral code")
     camp = await db.campaigns.find_one({"id": ref["campaign_id"]}, {"_id": 0})

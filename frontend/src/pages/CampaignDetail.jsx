@@ -58,7 +58,9 @@ export default function CampaignDetail() {
     fd.append("file", file);
     try {
       const { data } = await api.post(`/campaigns/${id}/import-csv`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-      toast.success(`Imported ${data.imported} conversions`);
+      toast.success(`Imported ${data.imported} conversions`, {
+        description: data.skipped?.length ? `Skipped ${data.skipped.length}: ${data.skipped.slice(0, 3).map((s) => `row ${s.row} (${s.reason})`).join(", ")}` : undefined,
+      });
       refetchAll();
     } catch {
       toast.error("Import failed");
@@ -199,7 +201,7 @@ export default function CampaignDetail() {
                   <tr key={r.id} className="border-b border-slate-50 last:border-0">
                     <td className="py-3 px-4 font-medium text-slate-800">{r.referrer_name}</td>
                     <td className="py-3 px-4 text-slate-600 capitalize">{r.type.replace("_", " ")}</td>
-                    <td className="py-3 px-4 text-slate-600">{r.type === "discount" ? `${r.amount}%` : fmtMoney(r.amount, r.currency)}</td>
+                    <td className="py-3 px-4 text-slate-600">{fmtMoney(r.amount, r.currency)}{r.rate ? ` · ${r.rate}% off` : ""}</td>
                     <td className="py-3 px-4"><StatusBadge status={r.status} /></td>
                   </tr>
                 ))}

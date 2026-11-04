@@ -23,7 +23,7 @@ const TEMPLATES = [
 ];
 
 const defaultForm = {
-  name: "", template: "ecommerce_purchase", conversion_event: "purchase",
+  name: "", template: "ecommerce_purchase", conversion_event: "purchase", audience: "all_customers",
   reward_type: "discount", reward_value: 15, reward_currency: "USD",
   language: "en", budget_cap: 2000, approval_mode: "auto_verify",
   channels: ["whatsapp", "copy_link"], paid_cpa_benchmark: 42,
@@ -56,6 +56,8 @@ export default function Campaigns() {
 
   const submit = () => {
     if (!form.name.trim()) return toast.error("Give your campaign a name");
+    if (!form.channels.length) return toast.error("Pick at least one sharing channel");
+    if (Number(form.reward_value) <= 0) return toast.error("Reward must be greater than 0");
     const tmpl = TEMPLATES.find((t) => t.id === form.template);
     createMut.mutate({ ...form, conversion_event: tmpl?.event || "purchase", reward_value: Number(form.reward_value), budget_cap: Number(form.budget_cap), paid_cpa_benchmark: Number(form.paid_cpa_benchmark) });
   };
@@ -98,6 +100,36 @@ export default function Campaigns() {
                       <p className="text-xs text-slate-500 mt-0.5">{t.desc}</p>
                     </button>
                   ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label className="mb-1.5 block">Audience</Label>
+                  <Select value={form.audience} onValueChange={(v) => set("audience", v)}>
+                    <SelectTrigger data-testid="audience-select"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all_customers">All customers</SelectItem>
+                      <SelectItem value="repeat_buyers">Repeat buyers</SelectItem>
+                      <SelectItem value="vip">VIP / top spenders</SelectItem>
+                      <SelectItem value="recent_buyers">Bought in last 30 days</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="mb-1.5 block">Sharing channels</Label>
+                  <div className="flex gap-2">
+                    {[["whatsapp", "WhatsApp"], ["copy_link", "Copy link"]].map(([id, label]) => {
+                      const on = form.channels.includes(id);
+                      return (
+                        <button key={id} type="button" data-testid={`channel-toggle-${id}`}
+                          onClick={() => set("channels", on ? form.channels.filter((c) => c !== id) : [...form.channels, id])}
+                          className={`flex-1 rounded-md border px-3 py-2 text-sm transition-colors ${on ? "border-indigo-500 bg-indigo-50 text-indigo-700" : "border-slate-200 text-slate-500 hover:border-slate-300"}`}>
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
 

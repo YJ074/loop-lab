@@ -1,0 +1,54 @@
+{
+  "summary": "Iteration 1: full backend (20 pytest tests) and frontend E2E (cookie auth) for Loop Lab v1. The core flows work: auth/me, workspace auto-bootstrap and seed, workspace update, campaign CRUD with 3 starter advocates, share variants (en/es), simulate, CSV import, review transitions, rewards totals and CSV export, abuse counts, analytics, public webhook (bad token or unknown code returns 404). On the frontend, login, overview KPIs and funnel chart, campaign builder dialog, campaign detail tabs, simulate/approve/add advocate/CSV import, conversions filters, rewards multi-currency cards and export, abuse approve/reject, settings save and persist, and logout all work. Found 1 security bug, 3 logic bugs and several smaller issues.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/public/conversions/{webhook_token}", "issue": "The referral code lookup is not limited to the token's workspace (db.referrers.find_one({'code': body.code})). Workspace A's webhook token accepts workspace B's codes. The conversion is stored with workspace_id=A but campaign_id=B, so it pollutes B's campaign stats and A's ledger. Confirmed by test_webhook_cross_workspace_code (returned 200). Fix: find_one({'code': body.code, 'workspace_id': ws['id']}).", "priority": "HIGH"},
+      {"endpoint": "Reward liability / CPA (_ingest_conversion, _campaign_stats, analytics_overview, /api/rewards totals)", "issue": "For discount campaigns, reward.amount = reward_value (a percentage, e.g. 15) is added up as money. The seeded Summer Launch campaign (15% discount) shows Approved liability $120, Pending $90 and Referral CPA $15, while ledger rows show '15%'. Liability and the CPA-vs-paid comparison are meaningless for discount rewards. Fix: store a monetary amount (e.g. order_value * pct / 100, in the order currency) or keep discounts out of money totals.", "priority": "HIGH"},
+      {"endpoint": "GET /api/abuse + POST /api/conversions/{id}/review", "issue": "The abuse queue lists every conversion with flags != [] whatever its status, so items never leave the queue after 'Approve anyway' or 'Reject' (confirmed in the UI: the row is still there after both actions). Also, reject maps conversion status to 'flagged' (unchanged) rather than a rejected state. Fix: filter the queue to status in ['flagged','pending'] with flags, add a 'rejected' status (or 'reversed') and a reviewed_at field.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "_ingest_conversion", "issue": "link = db.links.find_one({'referrer_id':...}) always picks the first link (whatsapp), so channel_performance gives every conversion to WhatsApp and copy_link always shows 0 conversions (seen in the Overview table: WhatsApp 14, Copy Link 0). ConversionWebhookIn needs a channel/short_code field, and attribution should use it."},
+      {"endpoint": "POST /api/campaigns", "issue": "budget_cap is stored but never enforced. Nothing stops rewards once liability is over the cap. There is no validation of the reward_type, approval_mode or currency enums, and no check that reward_value is greater than 0."},
+      {"endpoint": "get_workspace", "issue": "find-then-insert bootstrap is not atomic and the owner_user_id index is not unique. Parallel first requests could create duplicate workspaces. Could not reproduce in 5 runs, but it is a real risk. Make the owner index unique or use upsert."},
+      {"endpoint": "PUT /api/workspace", "issue": "The response leaves out webhook_url, unlike GET."},
+      {"endpoint": "POST /api/auth/logout", "issue": "Only removes cookie sessions; Bearer sessions are not invalidated."},
+      {"endpoint": "POST /api/campaigns/{id}/import-csv", "issue": "Returns only an imported count. Rows skipped for unknown codes are not reported (the UI shows 'Imported 0 conversions' with no reason). Also, float() on a bad order_value raises a ValueError, which causes a 500."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "AbuseQueue", "issue": "After Approve anyway or Reject, the row stays in the queue and shows no status, so the reviewer cannot tell which rows were handled (caused by the backend issue above).", "selector": "[data-testid^='abuse-row-']", "priority": "HIGH"}
+    ],
+    "integration_issues": [
+      {"flow": "Rewards ledger and Overview liability", "issue": "Ledger rows show '15%' but the liability cards show $120/$90 for the same rewards, which is inconsistent.", "affected_selectors": ["[data-testid='liability-USD']", "[data-testid='kpi-approved-liability']", "[data-testid='cpa-verdict']"]}
+    ],
+    "design_issues": [
+      {"screen": "Campaign builder dialog", "issues": ["Audience, channel selection and conversion-event fields from the spec are missing; only template, reward, currency, language, budget, approval and benchmark are offered."]},
+      {"screen": "Overview funnel", "issues": ["Conversions and verified bars are almost invisible next to shares/clicks (linear scale). Consider a log scale or value labels."]},
+      {"screen": "Settings webhook example", "issues": ["The curl code block overflows horizontally and the URL is cut off at the card edge."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_looplab_api.py", "/app/backend/tests/conftest.py", "/app/test_reports/pytest/pytest_results.xml"],
+  "action_items": [
+    "Limit the public webhook referral code lookup to the token's workspace_id",
+    "Fix reward liability for discount rewards: stop adding percentages up as currency in totals, CPA and analytics",
+    "Abuse queue: remove reviewed items (filter by status) and make reject set a distinct rejected/reversed status",
+    "Attribute conversions to the correct channel link (accept channel or short_code in the payload)",
+    "Enforce budget_cap and validate enums in CampaignIn; handle a bad order_value in CSV import (currently a 500)",
+    "Optionally add audience and channels selection to the campaign builder"
+  ],
+  "critical_code_review_comments": [
+    "server.py is 686 lines, close to the 700-line limit. Split it into routers (auth, campaigns, conversions, analytics, public).",
+    "_campaign_stats runs a find_one for each campaign, and analytics_overview calls it once per campaign, re-querying links, conversions and rewards each time (N+1 queries). Aggregate once.",
+    "The workspace owner_user_id index should be unique to prevent duplicate bootstrap.",
+    "Reject keeps conversion status 'flagged', so 'flagged' covers both 'needs review' and 'rejected'."
+  ],
+  "updated_files": ["/app/backend/tests/test_looplab_api.py", "/app/backend/tests/conftest.py"],
+  "success_rate": {"backend": "95% (19/20)", "frontend": "~90% (all flows work; abuse queue review UX broken)"},
+  "test_credentials": "Test users and sessions are created by conftest.create_test_user() (email TEST_test-user-*@example.com).",
+  "seed_data_creation": "Created several TEST_ users, sessions and their auto-seeded workspaces, plus TEST_Camp and TEST_UI Campaign campaigns, TEST_Jamie/TEST_Adv advocates and simulated/webhook conversions. All of it is in the test users' own workspaces and was not deleted. The real user's data was not touched.",
+  "retest_needed": true,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Run: cd /app/backend && python -m pytest tests/ -v (pytest.ini uses xdist). The conftest creates a fresh user per worker. The Conversions page uses conv-row-*; campaign detail uses conversion-row-*. The webhook-url is an input (use input_value). Seeded conversions always have a device fingerprint, so there are no 'pending' rows in the seed (all verified or flagged).",
+  "rca of the issue": "Cross-workspace webhook: public_conversion looks up the referrer by code alone. Liability: CampaignIn.reward_value has two meanings (percentage for discounts, money otherwise) but is copied straight into reward.amount and added up as money. Abuse queue: the /api/abuse filter is flags != [] with no status filter, and the review mapping keeps rejected items as 'flagged'."
+}
