@@ -66,7 +66,9 @@ class TestDiscountRewards:
         assert disc and all(r["rate"] == 15 for r in disc)
         assert any(r["amount"] != 15 for r in disc)
         k = client.get(f"{BASE_URL}/api/analytics/overview").json()["kpis"]
-        approved = sum(r["amount"] for r in d["rewards"] if r["status"] == "approved")
+        # iteration 3: overview converts to base currency with indicative FX
+        fxr = {"USD": 1.0, "EUR": 1.08, "GBP": 1.27}
+        approved = sum(r["amount"] * fxr[r["currency"]] for r in d["rewards"] if r["status"] == "approved")
         assert abs(k["approved_liability"] - round(approved, 2)) < 0.02
 
 

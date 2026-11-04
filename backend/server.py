@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ASCENDING, DESCENDING, IndexModel
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, ValidationError, model_validator
 
 
 ROOT_DIR = Path(__file__).parent
@@ -114,12 +114,12 @@ class CampaignIn(BaseModel):
 
 class CampaignUpdate(BaseModel):
     name: Optional[str] = None
-    status: Optional[str] = None
-    reward_value: Optional[float] = None
-    reward_currency: Optional[str] = None
-    budget_cap: Optional[float] = None
-    approval_mode: Optional[str] = None
-    paid_cpa_benchmark: Optional[float] = None
+    status: Optional[Literal["active", "paused"]] = None
+    reward_value: Optional[float] = Field(default=None, gt=0)
+    reward_currency: Optional[Literal["USD", "EUR", "GBP"]] = None
+    budget_cap: Optional[float] = Field(default=None, gt=0)
+    approval_mode: Optional[Literal["auto_verify", "manual", "auto_approve"]] = None
+    paid_cpa_benchmark: Optional[float] = Field(default=None, ge=0)
 
 
 class ReferrerIn(BaseModel):
@@ -140,7 +140,7 @@ class ConversionWebhookIn(BaseModel):
 
 class WorkspaceUpdate(BaseModel):
     name: Optional[str] = None
-    currency: Optional[str] = None
+    currency: Optional[Literal["USD", "EUR", "GBP"]] = None
     shopify_domain: Optional[str] = None
 
 
@@ -420,6 +420,10 @@ async def get_campaign(campaign_id: str, user: dict = Depends(get_current_user))
 async def update_campaign(campaign_id: str, body: CampaignUpdate, user: dict = Depends(get_current_user)):
     ws = await get_workspace(user)
     updates = {k: v for k, v in body.model_dump().items() if v is not None}
+    if "reward_value" in updates:
+        existing = await db.campaigns.find_one({"id": campaign_id, "workspace_id": ws["id"]}, {"_id": 0})
+        if existing and existing["reward_type"] == "discount" and updates["reward_value"] > 100:
+            raise HTTPException(status_code=422, detail="Discount cannot exceed 100%")
     if updates:
         await db.campaigns.update_one({"id": campaign_id, "workspace_id": ws["id"]}, {"$set": updates})
     camp = await db.campaigns.find_one({"id": campaign_id, "workspace_id": ws["id"]}, {"_id": 0})
@@ -581,6 +585,8 @@ async def import_csv(campaign_id: str, file: UploadFile = File(...), user: dict 
             count += 1
         except HTTPException as e:
             skipped.append({"row": i, "reason": e.detail})
+        except ValidationError:
+            skipped.append({"row": i, "reason": "invalid currency or channel"})
     return {"imported": count, "skipped": skipped}
 
 

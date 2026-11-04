@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 3 retest of the 6 fixes from iteration 2, plus a regression. All 6 fixes are verified. (1) The Toaster is bottom-right. Simulate conversion was clicked 4 times quickly without force=True, every click registered (conversions went from 14 to 18), and no toast blocked a click. (2) The FX rollups are correct. The Overview approved/pending liability ($190.87 / $136.38) exactly matches the per-currency /api/rewards totals converted at USD 1, EUR 1.08, GBP 1.27. With the base currency switched to EUR, the overview showed 277.66, which matches the converted totals. Campaign stats are in reward_currency. (3) The budget cap converts currencies: with a cap of 100 GBP, a 75 USD reward and a 30 EUR reward were approved and the next one was held as pending. (4) The filter-rejected chip lists only rejected conversions in the UI and the API. (5) A CSV import with 0 imported rows shows a warning toast (data-type=warning) that lists the skipped rows. (6) POST /campaigns returns 422 for discount 101, channels [] and channels ['sms']. The webhook returns 422 for currency JPY and channel sms. The builder blocks a 150% discount with the toast and sends no POST. The regression passes for Overview, builder create, Campaign detail tabs, Abuse approve/reject (rows leave the queue), the Rewards ledger and CSV export, and saving Settings (the change persists). Backend: 40 of 42 tests pass. Two new issues: the CSV import returns 500 on rows with an invalid currency or channel, and PUT /campaigns skips validation.",
+  "backend_issues": {
+    "critical": [
+      {"endpoint": "POST /api/campaigns/{id}/import-csv", "issue": "A CSV row with currency 'JPY' or channel 'sms' returns a 500 for the whole import. This is a side effect of the new Literal validation: ConversionWebhookIn(...) raises a pydantic ValidationError, but the loop only catches HTTPException (server.py around lines 572-583). Fix: also catch pydantic.ValidationError and append {row, reason: 'invalid currency/channel'} to skipped.", "priority": "HIGH"}
+    ],
+    "minor": [
+      {"endpoint": "PUT /api/campaigns/{id}", "issue": "CampaignUpdate has no validation. A PUT with reward_value 500 on a discount campaign returns 200. reward_currency, approval_mode and status accept any string, and budget_cap can be negative. This bypasses the CampaignIn rules."},
+      {"endpoint": "PUT /api/workspace", "issue": "WorkspaceUpdate.currency accepts any string ('JPY' returns 200 and is saved). fx() then silently falls back to a rate of 1.0, so the overview liability is shown as the USD figure labelled in the wrong currency. Use Literal['USD','EUR','GBP']."},
+      {"endpoint": "POST /api/conversions/{id}/review?action=approve", "issue": "Still has no budget_cap check on manual approval (carried over from iteration 2)."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Campaign detail / Abuse / Conversions", "issues": ["Money values are not shown with 2 decimal places: '$257.6', '£114.1', '€79.1'. Use Intl.NumberFormat with minimumFractionDigits: 2.", "The bottom-right toasts now partly cover the Reverse/Approve action buttons in the last visible table row on Campaign detail > Conversions. This is minor, and toasts auto-dismiss."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_iteration3_fixes.py", "/app/backend/tests/test_iteration2_fixes.py", "/app/backend/tests/test_looplab_api.py", "/app/test_reports/pytest/pytest_results_iter3.xml"],
+  "action_items": [
+    "HIGH: in import_csv, catch pydantic.ValidationError when building ConversionWebhookIn and add the row to skipped instead of returning 500",
+    "Add validation to CampaignUpdate (Literal enums, gt=0, discount <= 100 checked against the stored reward_type) and to WorkspaceUpdate.currency (Literal USD/EUR/GBP)",
+    "Optional: format money with 2 decimal places in the frontend; decide whether manual approvals should respect budget_cap"
+  ],
+  "critical_code_review_comments": [
+    "fx() falls back to a rate of 1.0 for unknown currencies, which hides bad data. Raise an error or validate at every entry point (WorkspaceUpdate, CampaignUpdate).",
+    "server.py is 735 lines, over the 700-line guideline. Split the routers.",
+    "The budget-cap aggregate and the reward insert are still not atomic. analytics_overview still makes N+1 _campaign_stats calls."
+  ],
+  "updated_files": ["/app/backend/tests/test_iteration3_fixes.py (new)", "/app/backend/tests/test_iteration2_fixes.py (test_seed_rewards_money_and_totals updated to expect FX-converted overview liability)"],
+  "success_rate": {"backend": "95% (40/42; failures are the CSV 500 and the PUT validation gap)", "frontend": "100% (all 6 retest items and the regression flows pass)"},
+  "seed_data_creation": "TEST_ users came only from conftest.create_test_user() and ui_user.py. At the end, all TEST_ users were deleted (TEST_smoke and test-user-22fe157fbe; pytest users were auto-cleaned), along with their 2 workspaces and the related campaigns/referrers/links/conversions/rewards/audit_logs and sessions, filtered by those workspace ids. 0 TEST_ users remain. The real user yashjani074@gmail.com was not touched (no user document with that email exists in this DB).",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run `cd /app/backend/tests && python -m pytest /app/backend/tests`. Two tests in test_iteration3_fixes.py are expected to fail until the CSV ValidationError fix and the CampaignUpdate validation land. For UI: `python ui_user.py create` gives a token; set the session_token cookie (secure, SameSite=None). The protected routes are /dashboard, /campaigns, /campaigns/:id, /conversions, /rewards, /abuse and /settings ('/' is the login page). Abuse buttons use the testids abuse-approve-{id} and abuse-reject-{id}. TEST_smoke has been deleted.",
+  "rca of the issue": "CSV 500: iteration 3 made ConversionWebhookIn.currency and channel Literal types. import_csv builds the model from raw CSV values inside try/except HTTPException, so pydantic.ValidationError is not caught and returns a 500 for the whole file. Reproduce: import a CSV with the header 'code,order_value,currency' and the row '<valid code>,10,JPY'. Fix: `except (HTTPException, ValidationError) as e: skipped.append(...)`."
+}
