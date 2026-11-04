@@ -9,9 +9,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { toast } from "sonner";
+import { KFactorPanel } from "@/components/KFactorPanel";
+import {
+  AlertDialog, AlertDialogTrigger, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogCancel, AlertDialogAction,
+} from "@/components/ui/alert-dialog";
 import {
   ArrowLeft, Share2, Copy, Play, Upload, MousePointerClick, Target, Coins, UserPlus,
-  MessageCircle, Mail, Instagram, Link2, CheckCircle2,
+  MessageCircle, Mail, Instagram, Link2, CheckCircle2, RotateCcw, Send,
 } from "lucide-react";
 
 const CHANNEL_ICON = { whatsapp: MessageCircle, copy_link: Link2, email: Mail, instagram: Instagram };
@@ -30,7 +35,7 @@ export default function CampaignDetail() {
   const { data: rewardsData } = useQuery({ queryKey: ["rewards", id], queryFn: async () => (await api.get(`/rewards?campaign_id=${id}`)).data });
 
   const refetchAll = () => {
-    ["campaign", "referrers", "conversions", "rewards", "share"].forEach((k) => qc.invalidateQueries({ queryKey: [k, id] }));
+    ["campaign", "referrers", "conversions", "rewards", "share", "kfactor"].forEach((k) => qc.invalidateQueries({ queryKey: [k, id] }));
     qc.invalidateQueries({ queryKey: ["analytics"] });
   };
 
@@ -38,6 +43,18 @@ export default function CampaignDetail() {
     mutationFn: async () => (await api.post(`/campaigns/${id}/simulate`)).data,
     onSuccess: (c) => { toast.success(`Simulated conversion → ${c.status}`); refetchAll(); },
     onError: (e) => toast.error(e?.response?.data?.detail || "Simulation failed"),
+  });
+
+  const activityMut = useMutation({
+    mutationFn: async () => (await api.post(`/campaigns/${id}/simulate-activity`)).data,
+    onSuccess: (a) => { toast.success(`Recorded 1 share and ${a.clicks} click(s) on ${a.channel.replace("_", " ")}`); refetchAll(); },
+    onError: (e) => toast.error(e?.response?.data?.detail || "Could not record activity"),
+  });
+
+  const resetMut = useMutation({
+    mutationFn: async () => (await api.post(`/campaigns/${id}/reset`)).data,
+    onSuccess: () => { toast.success("Demo data cleared. K is back to 0.00"); refetchAll(); },
+    onError: () => toast.error("Reset failed"),
   });
 
   const addRefMut = useMutation({
@@ -90,12 +107,34 @@ export default function CampaignDetail() {
             {camp.template.replace(/_/g, " ")} · {camp.conversion_event} event · reward {camp.reward_type === "discount" ? `${camp.reward_value}%` : fmtMoney(camp.reward_value, cur)} · {camp.approval_mode.replace(/_/g, " ")}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => activityMut.mutate()} disabled={activityMut.isPending} data-testid="simulate-activity-button">
+            <Send className="h-4 w-4 mr-1" /> Simulate share & click
+          </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" className="text-red-600 hover:text-red-700" data-testid="reset-demo-button">
+                <RotateCcw className="h-4 w-4 mr-1" /> Reset demo
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent data-testid="reset-demo-dialog">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Reset this campaign's data?</AlertDialogTitle>
+                <AlertDialogDescription>This permanently deletes this campaign's advocates, links, shares, clicks, conversions and rewards. The campaign and its settings stay. This can't be undone.</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel data-testid="reset-demo-cancel">Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={() => resetMut.mutate()} className="bg-red-600 hover:bg-red-700" data-testid="reset-demo-confirm">Reset to zero</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <Button variant="outline" onClick={() => simulateMut.mutate()} disabled={simulateMut.isPending} data-testid="simulate-conversion-button">
             <Play className="h-4 w-4 mr-1" /> Simulate conversion
           </Button>
         </div>
       </div>
+
+      <KFactorPanel campaignId={id} />
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
         <StatCard testId="detail-clicks" label="Clicks" value={s.clicks} icon={MousePointerClick} accent="sky" />

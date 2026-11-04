@@ -257,19 +257,20 @@ async def seed_demo(ws: dict):
 
 
 # ---------------------------------------------------------------- Referrer + link helpers
-async def _create_referrer(camp: dict, name: str, email: str) -> dict:
+async def _create_referrer(camp: dict, name: str, email: str, demo: bool = True) -> dict:
     code = f"{name.split(' ')[0][:4].upper()}{pysecrets.token_hex(2).upper()}"
     ref = {"id": gen_id("ref"), "campaign_id": camp["id"], "workspace_id": camp["workspace_id"],
            "name": name, "email": email, "code": code, "created_at": iso()}
     await db.referrers.insert_one(dict(ref))
     for channel in camp.get("channels", ["copy_link"]):
         short = pysecrets.token_urlsafe(5)
-        shares = random.randint(30, 90)
-        clicks = random.randint(8, max(9, shares - 4))
+        shares = random.randint(30, 90) if demo else 0
+        clicks = random.randint(8, max(9, shares - 4)) if demo else 0
+        first_shared = (datetime.now(timezone.utc) - timedelta(days=random.uniform(2, 14))).isoformat() if demo else None
         link = {"id": gen_id("link"), "referrer_id": ref["id"], "campaign_id": camp["id"],
                 "workspace_id": camp["workspace_id"], "channel": channel, "short_code": short,
                 "url": f"https://loop.link/{short}?c={code}&ch={channel}",
-                "clicks": clicks, "shares": shares, "created_at": iso()}
+                "clicks": clicks, "shares": shares, "first_shared_at": first_shared, "created_at": iso()}
         await db.links.insert_one(dict(link))
     return ref
 
@@ -468,7 +469,7 @@ async def add_referrer(campaign_id: str, body: ReferrerIn, user: dict = Depends(
     camp = await db.campaigns.find_one({"id": campaign_id, "workspace_id": ws["id"]}, {"_id": 0})
     if not camp:
         raise HTTPException(status_code=404, detail="Campaign not found")
-    ref = await _create_referrer(camp, body.name, body.email)
+    ref = await _create_referrer(camp, body.name, body.email, demo=False)
     ref["links"] = await db.links.find({"referrer_id": ref["id"]}, {"_id": 0}).to_list(20)
     await _log(ws["id"], "referrer", f"Added advocate {body.name}")
     return ref
@@ -710,6 +711,94 @@ async def public_conversion(webhook_token: str, body: ConversionWebhookIn):
     camp = await db.campaigns.find_one({"id": ref["campaign_id"]}, {"_id": 0})
     conv = await _ingest_conversion(ws, camp, body, source="webhook")
     return {"ok": True, "conversion_id": conv["id"], "status": conv["status"]}
+
+
+# ---------------------------------------------------------------- K-factor
+async def _kfactor(camp: dict) -> dict:
+    q = {"campaign_id": camp["id"], "workspace_id": camp["workspace_id"]}
+    customers = await db.referrers.count_documents(q)
+    links = await db.links.find(q, {"_id": 0}).to_list(5000)
+    shares = sum(l.get("shares", 0) for l in links)
+    clicks = sum(l.get("clicks", 0) for l in links)
+    convs = await db.conversions.find({**q, "status": "verified"}, {"_id": 0}).to_list(5000)
+    conversions = len(convs)
+    first_share: dict = {}
+    for l in links:
+        ts = l.get("first_shared_at")
+        if ts and (l["referrer_id"] not in first_share or ts < first_share[l["referrer_id"]]):
+            first_share[l["referrer_id"]] = ts
+    deltas = []
+    for c in convs:
+        fs = first_share.get(c["referrer_id"])
+        if fs:
+            d = (datetime.fromisoformat(c["created_at"]) - datetime.fromisoformat(fs)).total_seconds() / 3600
+            deltas.append(max(0.0, d))
+    return {
+        "campaign_id": camp["id"], "campaign_name": camp["name"],
+        "customers": customers, "shares": shares, "clicks": clicks, "conversions": conversions,
+        "k": round(conversions / customers, 4) if customers else 0.0,
+        "shares_per_customer": round(shares / customers, 4) if customers else 0.0,
+        "click_rate": round(clicks / shares, 4) if shares else 0.0,
+        "conversion_rate": round(conversions / clicks, 4) if clicks else 0.0,
+        "cycle_time_hours": round(sum(deltas) / len(deltas), 2) if deltas else None,
+        "small_sample": customers < 20,
+    }
+
+
+async def _owned_campaign(campaign_id: str, user: dict) -> dict:
+    ws = await get_workspace(user)
+    camp = await db.campaigns.find_one({"id": campaign_id, "workspace_id": ws["id"]}, {"_id": 0})
+    if not camp:
+        raise HTTPException(status_code=404, detail="Campaign not found")
+    return camp
+
+
+@api_router.get("/campaigns/{campaign_id}/kfactor")
+async def campaign_kfactor(campaign_id: str, user: dict = Depends(get_current_user)):
+    return await _kfactor(await _owned_campaign(campaign_id, user))
+
+
+@api_router.post("/campaigns/{campaign_id}/simulate-activity")
+async def simulate_activity(campaign_id: str, user: dict = Depends(get_current_user)):
+    camp = await _owned_campaign(campaign_id, user)
+    links = await db.links.find({"campaign_id": camp["id"]}, {"_id": 0}).to_list(5000)
+    if not links:
+        raise HTTPException(status_code=400, detail="Add an advocate first")
+    link = random.choice(links)
+    clicks = random.randint(0, 2)
+    await db.links.update_one({"id": link["id"]}, {"$inc": {"shares": 1, "clicks": clicks}})
+    if not link.get("first_shared_at"):
+        await db.links.update_one({"id": link["id"]}, {"$set": {"first_shared_at": iso()}})
+    return {"channel": link["channel"], "shares": 1, "clicks": clicks}
+
+
+@api_router.post("/campaigns/{campaign_id}/reset")
+async def reset_campaign(campaign_id: str, user: dict = Depends(get_current_user)):
+    camp = await _owned_campaign(campaign_id, user)
+    q = {"campaign_id": camp["id"], "workspace_id": camp["workspace_id"]}
+    removed = {c: (await db[c].delete_many(q)).deleted_count
+               for c in ("rewards", "conversions", "links", "referrers")}
+    await _log(camp["workspace_id"], "reset", f"Reset demo data for campaign {camp['name']}")
+    return {"ok": True, "removed": removed}
+
+
+@api_router.post("/public/links/{short_code}/share")
+async def public_share(short_code: str):
+    link = await db.links.find_one({"short_code": short_code}, {"_id": 0})
+    if not link:
+        raise HTTPException(status_code=404, detail="Unknown link")
+    await db.links.update_one({"id": link["id"]}, {"$inc": {"shares": 1}})
+    if not link.get("first_shared_at"):
+        await db.links.update_one({"id": link["id"]}, {"$set": {"first_shared_at": iso()}})
+    return {"ok": True}
+
+
+@api_router.post("/public/links/{short_code}/click")
+async def public_click(short_code: str):
+    res = await db.links.update_one({"short_code": short_code}, {"$inc": {"clicks": 1}})
+    if not res.matched_count:
+        raise HTTPException(status_code=404, detail="Unknown link")
+    return {"ok": True}
 
 
 @api_router.get("/")

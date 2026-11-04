@@ -1,12 +1,13 @@
 import { NavLink, useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import {
-  Repeat, LayoutDashboard, Megaphone, Target, Coins, ShieldAlert, Settings, LogOut,
+  Repeat, LayoutDashboard, Megaphone, Target, Coins, ShieldAlert, Settings, LogOut, LineChart,
 } from "lucide-react";
 
 const NAV = [
   { to: "/dashboard", label: "Overview", icon: LayoutDashboard, testId: "nav-overview" },
   { to: "/campaigns", label: "Campaigns", icon: Megaphone, testId: "nav-campaigns" },
+  { to: "/projection", label: "Projection", icon: LineChart, testId: "nav-projection" },
   { to: "/conversions", label: "Conversions", icon: Target, testId: "nav-conversions" },
   { to: "/rewards", label: "Reward Ledger", icon: Coins, testId: "nav-rewards" },
   { to: "/abuse", label: "Abuse Queue", icon: ShieldAlert, testId: "nav-abuse" },

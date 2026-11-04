@@ -1,4 +1,7 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { KFactorPanel } from "@/components/KFactorPanel";
+import { CampaignSwitcher } from "@/components/CampaignSwitcher";
 import { api, fmtMoney } from "@/lib/api";
 import { StatCard } from "@/components/StatCard";
 import {
@@ -11,9 +14,11 @@ import {
 const FUNNEL_COLORS = ["#6366f1", "#818cf8", "#34d399", "#10b981"];
 
 export default function Overview() {
+  const [kCampaign, setKCampaign] = useState(null);
   const { data, isLoading } = useQuery({
     queryKey: ["analytics"],
     queryFn: async () => (await api.get("/analytics/overview")).data,
+    refetchInterval: 5000,
   });
 
   if (isLoading || !data) {
@@ -37,7 +42,10 @@ export default function Overview() {
           <h1 className="font-display text-3xl font-bold text-slate-900">Overview</h1>
           <p className="text-slate-500 mt-1">Your referral engine at a glance.</p>
         </div>
+        <CampaignSwitcher value={kCampaign} onChange={setKCampaign} testId="overview-campaign-switcher" />
       </div>
+
+      <KFactorPanel campaignId={kCampaign} />
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-5">
         <StatCard testId="kpi-shares" label="Shares" value={k.shares.toLocaleString()} icon={Share2} accent="indigo" delay={0} />

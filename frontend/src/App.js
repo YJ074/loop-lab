@@ -13,6 +13,7 @@ import Conversions from "@/pages/Conversions";
 import Rewards from "@/pages/Rewards";
 import AbuseQueue from "@/pages/AbuseQueue";
 import Settings from "@/pages/Settings";
+import Projection from "@/pages/Projection";
 
 function Protected({ children }) {
   const { user, loading } = useAuth();
@@ -38,6 +39,7 @@ function AppRouter() {
       <Route path="/dashboard" element={<Protected><Overview /></Protected>} />
       <Route path="/campaigns" element={<Protected><Campaigns /></Protected>} />
       <Route path="/campaigns/:id" element={<Protected><CampaignDetail /></Protected>} />
+      <Route path="/projection" element={<Protected><Projection /></Protected>} />
       <Route path="/conversions" element={<Protected><Conversions /></Protected>} />
       <Route path="/rewards" element={<Protected><Rewards /></Protected>} />
       <Route path="/abuse" element={<Protected><AbuseQueue /></Protected>} />
