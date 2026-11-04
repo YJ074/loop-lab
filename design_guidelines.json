@@ -1,0 +1,70 @@
+{
+  "app_type": "dashboard",
+  "context": "Ads-manager style dashboard for Shopify DTC brands to run measurable referral campaigns (Loop Lab v1) with high-density widgets, clean attribution trust states (pending, verified, reversed, flagged), campaign builder, share links generator, conversion tracking, reward liability ledger, and abuse review queue.",
+  "typography": {
+    "headings": "Cabinet Grotesk, Outfit, sans-serif",
+    "body": "IBM Plex Sans, Inter, sans-serif",
+    "weights": {
+      "light": "300",
+      "regular": "400",
+      "medium": "500",
+      "semibold": "600",
+      "bold": "700"
+    }
+  },
+  "colors": {
+    "archetype": "The Performance Pro & High-Contrast Swiss Data",
+    "primary": "#0F172A",
+    "accent": "#6366F1",
+    "success": "#10B981",
+    "warning": "#F59E0B",
+    "danger": "#EF4444",
+    "neutral_bg": "#F8FAFC",
+    "surface": "#FFFFFF",
+    "border": "#E2E8F0"
+  },
+  "visual_enhancers": {
+    "borders": "1px solid #E2E8F0",
+    "border_radius": "rounded-lg",
+    "shadows": "shadow-sm hover:shadow transition-all duration-200",
+    "glassmorphism": "backdrop-blur-xl bg-white/90 border border-slate-200/80"
+  },
+  "layouts": {
+    "dashboard_grid": "grid grid-cols-1 md:grid-cols-4 gap-6 p-6",
+    "card_style": "bg-white border border-slate-200 rounded-lg p-5 shadow-sm"
+  },
+  "motion": {
+    "transition": "transform 0.2s ease, opacity 0.2s ease, background-color 0.2s ease",
+    "hover_effects": "hover:-translate-y-0.5 transition-transform"
+  },
+  "accessibility": {
+    "contrast": "WCAG AA compliant, APCA verified dark text on light backgrounds",
+    "focus_states": "focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+  },
+  "image_urls": [
+    {
+      "category": "hero_workspace",
+      "description": "E-commerce analytics & store management workspace preview",
+      "image_url": "https://images.unsplash.com/photo-1658297063569-162817482fb6?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjA2ODl8MHwxfHNlYXJjaHwxfHxzaG9waWZ5JTIwYnJhbmQlMjBzdG9yZSUyMGVjb21tZXJjZSUyMGFlc3RoZXRpY3xlbnwwfHx8fDE3OTM3NzU1NjR8MA&ixlib=rb-4.1.0&q=85"
+    }
+  ],
+  "instructions_to_main_agent": [
+    "Build Loop Lab v1 ads-manager style dashboard using React.js (.js files), Tailwind CSS, and Shadcn UI components.",
+    "Implement Workspace & Campaign Management with campaign list, fast-create wizard (audience rules, conversion rules, reward rules, budget caps).",
+    "Include Tracked Share Links generator with WhatsApp-first sharing, copy variants, and channel stats.",
+    "Include Conversion Tracking table with attribution trust states (pending, verified, reversed, flagged) + demo mode simulator + CSV fallback.",
+    "Include Reward Liability Ledger with multi-currency totals and pending/approved/reversed status.",
+    "Include Analytics Dashboard with funnel (shares -> clicks -> conversions), CPA vs paid acquisition metrics.",
+    "Include Abuse Controls review queue (self-referral detection, coupon leakage flags, suspicious conversion review).",
+    "Ensure all interactive elements and key informational items have data-testid attributes.",
+    "Ensure solid or glassmorphic header (never transparent) with clear navigation."
+  ],
+  "UNIVERSAL GUIDELINES FOR MAIN AGENT": [
+    "Avoid generic centered layouts, simplistic gradients, and uniform styling.",
+    "Create depth through layered design elements with z-index hierarchy.",
+    "Use glass-morphism effects with backdrop filters (12-24px blur).",
+    "Never use universal transition (transition: all).",
+    "Ensure all interactive elements have data-testid attributes.",
+    "Use Sonner for toasts."
+  ]
+}
