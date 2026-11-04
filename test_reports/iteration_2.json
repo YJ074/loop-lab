@@ -1,0 +1,41 @@
+{
+  "summary": "Iteration 2 retest of the 8 fixes from iteration 1, plus a core regression. Backend: 31 of 31 pytest tests pass (20 regression tests plus 11 new ones in test_iteration2_fixes.py). All 8 fixes are verified on the API and the UI: cross-workspace webhook code returns 404 (same workspace returns 200); the channel field attributes to the right link; discount rewards are money values (123 EUR at 15% gives 18.45 EUR, rate 15) and existing data was migrated (0 discount rewards without a rate); the abuse queue lists only flagged/pending items and approved/rejected items leave the queue, both on the API and as UI rows; the Rejected badge shows on Conversions; simulate spreads conversions across channels (Copy Link conversions went from 8 to 10); CSV import reports skipped rows and the toast lists them; CampaignIn returns 422 for bad enums and reward_value <= 0; budget_cap holds new rewards as pending; PUT /workspace returns webhook_url; the builder's Audience select and channel toggles work, the no-channel error toast shows, and audience/channels are stored. Regression passes for login page, Overview, Campaigns, Campaign detail tabs, Conversions, Rewards ledger ('$8.19 · 15% off') and CSV export, Settings save/webhook, and logout. New issues are minor: amounts in different currencies are added together, and toasts overlap the Simulate button.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/analytics/overview, _campaign_stats (approved_liability, pending_liability, cpa)", "issue": "Discount rewards now take the order currency (USD/EUR/GBP), but liability and CPA add the raw amounts across currencies and the UI shows the result as '$'. Example: Overview approved liability $159.41 = USD 118.47 + EUR 26.90 + GBP 14.04. Fix: convert to the workspace base currency, or show totals per currency."},
+      {"endpoint": "_ingest_conversion budget_cap check", "issue": "The spent total adds approved reward amounts across currencies before comparing with budget_cap (which is in reward_currency). It is also only checked at ingest: POST /conversions/{id}/review?action=approve sets the reward to approved without any cap check, so manual approvals can go over the budget. This may be an intended override, but the UI does not warn about it."},
+      {"endpoint": "CampaignIn / ConversionWebhookIn", "issue": "audience and channels are free strings/lists with no validation (any channel string is accepted). Discount reward_value has no upper limit (over 100% is accepted). The webhook currency is not validated."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "Sonner Toaster (App.js position='top-right')", "issue": "Toasts stack over the 'Simulate conversion' button in the Campaign detail header. After 1 or 2 rapid simulations, Playwright saw the toast intercepting pointer events and the next click failed for 30s. A user clicking Simulate repeatedly hits the same block. Fix: move the toaster to bottom-right or add a top offset.", "selector": "[data-testid='simulate-conversion-button']", "priority": "MEDIUM"},
+      {"component": "Conversions page filters", "issue": "There is no 'Rejected' filter chip (only All/Pending/Verified/Flagged/Reversed), although the API supports ?status=rejected.", "selector": "[data-testid^='filter-']", "priority": "LOW"},
+      {"component": "CampaignDetail CSV import toast", "issue": "When 0 rows are imported and all are skipped, the toast is still a green success. It should be a warning or error.", "selector": "[data-testid='csv-import-input']", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Overview / Campaign detail KPI cards", "issues": ["The Approved/Pending liability and CPA cards show mixed-currency sums with a '$' symbol (see the backend minor issue)."]}
+    ]
+  },
+  "test_report_links": ["/app/backend/tests/test_looplab_api.py", "/app/backend/tests/test_iteration2_fixes.py", "/app/backend/tests/conftest.py", "/app/test_reports/pytest/pytest_results_iter2.xml"],
+  "action_items": [
+    "Move the Sonner toaster (e.g. bottom-right) so it does not block the Simulate conversion button",
+    "Stop adding liability/CPA amounts across currencies: convert to the base currency or break the totals down per currency",
+    "Optional: add a 'Rejected' filter on Conversions; show a warning toast when a CSV import imports 0 rows; validate channels/audience enums; cap discount % at 100; decide on budget-cap behaviour for manual approvals"
+  ],
+  "critical_code_review_comments": [
+    "server.py is 719 lines, over the 700-line guideline. Consider splitting routes (campaigns, conversions, rewards, analytics, public) into modules.",
+    "_campaign_stats runs 4 queries per campaign, and analytics_overview calls it once per campaign (N+1). Fine for v1, but it will slow down as campaigns grow.",
+    "The budget-cap aggregate and the reward insert are not atomic, so concurrent conversions can both pass the cap check.",
+    "Logout still only invalidates cookie sessions, not Bearer sessions (carried over from iteration 1)."
+  ],
+  "updated_files": ["/app/backend/tests/conftest.py (added CREATED_USER_IDS tracking + session-scoped cleanup filtered by test workspace ids)", "/app/backend/tests/test_iteration2_fixes.py (new)", "/app/backend/tests/ui_user.py (new helper to create and clean up a UI test user)"],
+  "success_rate": {"backend": "100% (31/31)", "frontend": "~95% (all 8 fixes verified in UI; toast overlay blocks repeated Simulate clicks)"},
+  "seed_data_creation": "Only TEST_ users created via conftest.create_test_user(); all of them plus their workspaces/campaigns/referrers/links/conversions/rewards/audit_logs/sessions were deleted at the end, filtered by their own workspace ids. 9 pre-existing TEST_ users from iteration 1 were left untouched (not created by this run). Real user yashjani074@gmail.com data was not touched.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Run `cd /app/backend/tests && python -m pytest /app/backend/tests` (xdist -n 2 loadscope). conftest now tracks and cleans up created users automatically. For UI: `python /app/backend/tests/ui_user.py create` prints uid and token; set the session_token cookie (secure, SameSite=None); then `python ui_user.py cleanup <uid>`. Note that clicking logout deletes the session. The CSV import input is in the Campaign detail 'Conversions' tab. Use force=True on header buttons because toasts overlap them.",
+  "rca of the issue": "Toast overlap: <Toaster position='top-right'> in App.js renders over the top-right page header where the Simulate button sits, and the toast <li> intercepts pointer events. Currency mixing: fix #2 moved discount rewards to the order currency, but analytics_overview and _campaign_stats still do sum(r['amount']) without grouping by currency."
+}

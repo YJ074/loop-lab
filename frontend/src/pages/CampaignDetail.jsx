@@ -58,7 +58,7 @@ export default function CampaignDetail() {
     fd.append("file", file);
     try {
       const { data } = await api.post(`/campaigns/${id}/import-csv`, fd, { headers: { "Content-Type": "multipart/form-data" } });
-      toast.success(`Imported ${data.imported} conversions`, {
+      toast[data.imported ? "success" : "warning"](`Imported ${data.imported} conversions`, {
         description: data.skipped?.length ? `Skipped ${data.skipped.length}: ${data.skipped.slice(0, 3).map((s) => `row ${s.row} (${s.reason})`).join(", ")}` : undefined,
       });
       refetchAll();

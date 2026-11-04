@@ -5,7 +5,7 @@ import { StatusBadge, ConfidenceBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 
-const FILTERS = ["all", "pending", "verified", "flagged", "reversed"];
+const FILTERS = ["all", "pending", "verified", "flagged", "rejected", "reversed"];
 
 export default function Conversions() {
   const qc = useQueryClient();

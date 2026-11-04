@@ -53,7 +53,7 @@ function App() {
       <AuthProvider>
         <BrowserRouter>
           <AppRouter />
-          <Toaster position="top-right" richColors />
+          <Toaster position="bottom-right" richColors />
         </BrowserRouter>
       </AuthProvider>
     </div>

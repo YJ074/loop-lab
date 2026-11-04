@@ -58,6 +58,7 @@ export default function Campaigns() {
     if (!form.name.trim()) return toast.error("Give your campaign a name");
     if (!form.channels.length) return toast.error("Pick at least one sharing channel");
     if (Number(form.reward_value) <= 0) return toast.error("Reward must be greater than 0");
+    if (form.reward_type === "discount" && Number(form.reward_value) > 100) return toast.error("Discount can't exceed 100%");
     const tmpl = TEMPLATES.find((t) => t.id === form.template);
     createMut.mutate({ ...form, conversion_event: tmpl?.event || "purchase", reward_value: Number(form.reward_value), budget_cap: Number(form.budget_cap), paid_cpa_benchmark: Number(form.paid_cpa_benchmark) });
   };

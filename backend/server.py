@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ASCENDING, DESCENDING, IndexModel
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 ROOT_DIR = Path(__file__).parent
@@ -102,8 +102,14 @@ class CampaignIn(BaseModel):
     language: Literal["en", "es"] = "en"
     budget_cap: float = Field(default=1000.0, gt=0)
     approval_mode: Literal["auto_verify", "manual", "auto_approve"] = "auto_verify"
-    channels: List[str] = ["whatsapp", "copy_link"]
+    channels: List[Literal["whatsapp", "copy_link"]] = Field(default=["whatsapp", "copy_link"], min_length=1)
     paid_cpa_benchmark: float = 40.0
+
+    @model_validator(mode="after")
+    def _discount_cap(self):
+        if self.reward_type == "discount" and self.reward_value > 100:
+            raise ValueError("Discount cannot exceed 100%")
+        return self
 
 
 class CampaignUpdate(BaseModel):
@@ -125,8 +131,8 @@ class ConversionWebhookIn(BaseModel):
     code: str
     event_type: str = "purchase"
     order_value: float = 0.0
-    currency: str = "USD"
-    channel: Optional[str] = None
+    currency: Literal["USD", "EUR", "GBP"] = "USD"
+    channel: Optional[Literal["whatsapp", "copy_link"]] = None
     customer_email: Optional[str] = None
     device_fingerprint: Optional[str] = None
     coupon_code: Optional[str] = None
@@ -270,6 +276,12 @@ async def _create_referrer(camp: dict, name: str, email: str) -> dict:
 
 # ---------------------------------------------------------------- Conversion + abuse logic
 COUPON_SITE_FLAGS = {"SAVE10", "HONEYDEAL", "RETAILMENOT"}
+# indicative rates (to USD) used only to roll up mixed-currency liability into one figure
+INDICATIVE_FX = {"USD": 1.0, "EUR": 1.08, "GBP": 1.27}
+
+
+def fx(amount: float, src: str, dst: str) -> float:
+    return amount * INDICATIVE_FX.get(src, 1.0) / INDICATIVE_FX.get(dst, 1.0)
 
 
 async def _ingest_conversion(ws: dict, camp: dict, payload: ConversionWebhookIn, source: str) -> dict:
@@ -330,10 +342,12 @@ async def _ingest_conversion(ws: dict, camp: dict, payload: ConversionWebhookIn,
         reward_cur = camp["reward_currency"]
         reward_rate = None
     if reward_status == "approved" and camp.get("budget_cap"):
+        cap_cur = camp["reward_currency"]
         spent = await db.rewards.aggregate([
             {"$match": {"campaign_id": camp["id"], "status": "approved"}},
-            {"$group": {"_id": None, "t": {"$sum": "$amount"}}}]).to_list(1)
-        if (spent[0]["t"] if spent else 0) + reward_amount > camp["budget_cap"]:
+            {"$group": {"_id": "$currency", "t": {"$sum": "$amount"}}}]).to_list(10)
+        total = sum(fx(s["t"], s["_id"], cap_cur) for s in spent) + fx(reward_amount, reward_cur, cap_cur)
+        if total > camp["budget_cap"]:
             reward_status = "pending"
     reward = {"id": gen_id("rwd"), "campaign_id": camp["id"], "workspace_id": ws["id"],
               "referrer_id": ref["id"], "referrer_name": ref["name"], "conversion_id": conv["id"],
@@ -423,8 +437,9 @@ async def _campaign_stats(campaign_id: str) -> dict:
     verified = [c for c in convs if c["status"] == "verified"]
     flagged = [c for c in convs if c["status"] == "flagged"]
     rewards = await db.rewards.find({"campaign_id": campaign_id}, {"_id": 0}).to_list(2000)
-    approved_liability = sum(r["amount"] for r in rewards if r["status"] == "approved")
     camp = await db.campaigns.find_one({"id": campaign_id}, {"_id": 0})
+    cur = camp.get("reward_currency", "USD") if camp else "USD"
+    approved_liability = sum(fx(r["amount"], r["currency"], cur) for r in rewards if r["status"] == "approved")
     cpa = round(approved_liability / len(verified), 2) if verified else 0.0
     return {"shares": shares, "clicks": clicks, "conversions": len(convs),
             "verified": len(verified), "flagged": len(flagged),
@@ -644,8 +659,9 @@ async def analytics_overview(user: dict = Depends(get_current_user)):
     clicks = sum(l.get("clicks", 0) for l in links)
     verified = [c for c in convs if c["status"] == "verified"]
     flagged = [c for c in convs if c["status"] == "flagged"]
-    approved_liability = sum(r["amount"] for r in rewards if r["status"] == "approved")
-    pending_liability = sum(r["amount"] for r in rewards if r["status"] == "pending")
+    base = ws.get("currency", "USD")
+    approved_liability = sum(fx(r["amount"], r["currency"], base) for r in rewards if r["status"] == "approved")
+    pending_liability = sum(fx(r["amount"], r["currency"], base) for r in rewards if r["status"] == "pending")
     cpa = round(approved_liability / len(verified), 2) if verified else 0.0
     bench = (sum(c.get("paid_cpa_benchmark", 0) for c in camps) / len(camps)) if camps else 0
     channel_perf: dict = {}
